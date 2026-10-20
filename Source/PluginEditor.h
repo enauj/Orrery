@@ -23,11 +23,18 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     bool keyPressed (const juce::KeyPress&) override;
 
+   #if MODLANES_PAINT_LOG
+    // Time spent on the message thread (benchmark build): animation, painting, timer.
+    struct FrameTimes { double animate = 0.0, paint = 0.0, timer = 0.0, editorMs = 0.0, section[6] {}; int paintCalls = 0, frames = 0, editorPaints = 0; };
+    static inline FrameTimes frameTimes;
+   #endif
+
 private:
     void timerCallback() override;
     void selectBlock (int lane, int index);
     void setMapping (int lfo);
     void useSoftwareRenderer();
+    void paintNow();
 
     ModLanesProcessor& proc;
     modlanes::theme::LookAndFeel lookAndFeel;

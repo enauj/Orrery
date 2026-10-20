@@ -98,12 +98,16 @@ void collect (juce::Component& root, juce::Array<T*>& out)
 } // namespace
 
 int runLiveCheck (int blockSize, bool gpu);
+int runProfile (int blockSize, bool gpu);
 
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juce;
 
-    // "ModLanesBench live [blockSize]": animation smoothness check in a real window.
+    // "ModLanesBench live [blockSize] [gpu]": animation smoothness check in a real window.
+    // "ModLanesBench profile [blockSize] [gpu]": where the UI's CPU time goes.
+    if (argc > 1 && juce::String (argv[1]) == "profile")
+        return runProfile (argc > 2 ? juce::String (argv[2]).getIntValue() : 512, argc > 3 && juce::String (argv[3]) == "gpu");
     if (argc > 1 && juce::String (argv[1]) == "live")
         return runLiveCheck (argc > 2 ? juce::String (argv[2]).getIntValue() : 512, argc > 3 && juce::String (argv[3]) == "gpu");
 

@@ -194,20 +194,53 @@ void ModLanesEditor::animationFrame()
         return;
     lastAnimationMs = now;
 
+   #if MODLANES_PAINT_LOG
+    const double animateStart = juce::Time::getMillisecondCounterHiRes();
+   #endif
     const bool live = liveButton.getToggleState();
     for (auto& lane : lanes)
+    {
         lane->animate();
+        paintNow();
+    }
     inspector.animateModulation (live);
+    paintNow();
     orrery.refresh (live);
+    paintNow();
 
-    // Paint now rather than whenever Windows gets round to it: paint messages have the
-    // lowest priority and were delivered in bursts (about 25 per second with ~100 ms gaps).
+   #if MODLANES_PAINT_LOG
+    frameTimes.animate += juce::Time::getMillisecondCounterHiRes() - animateStart;
+    ++frameTimes.frames;
+   #endif
+}
+
+// Paints what is pending right away, rather than whenever Windows gets round to it:
+// paint messages have the lowest priority and were delivered in bursts (about 25 per
+// second with ~100 ms gaps). Called after each part of the window: the software
+// renderer copies the whole box around everything pending to the screen, and one box
+// around changes at the top and bottom of the window covered nearly all of it.
+void ModLanesEditor::paintNow()
+{
+   #if MODLANES_PAINT_LOG
+    const double start = juce::Time::getMillisecondCounterHiRes();
+   #endif
     if (auto* peer = getPeer())
         peer->performAnyPendingRepaintsNow();
+   #if MODLANES_PAINT_LOG
+    ++frameTimes.paintCalls;
+    frameTimes.paint += juce::Time::getMillisecondCounterHiRes() - start;
+   #endif
 }
 
 void ModLanesEditor::timerCallback()
 {
+   #if MODLANES_PAINT_LOG
+    struct Timed
+    {
+        double start = juce::Time::getMillisecondCounterHiRes();
+        ~Timed() { frameTimes.timer += juce::Time::getMillisecondCounterHiRes() - start; }
+    } timed;
+   #endif
     useSoftwareRenderer();
 
     // Patterns changed outside the editor (state restored by the host).
@@ -222,6 +255,7 @@ void ModLanesEditor::timerCallback()
     const bool live = liveButton.getToggleState();
     phrase.refresh(); // always on (also without Live view); repaints only when it changes
     sceneBar.refresh();
+    paintNow();
     inspector.refreshModulation();
 
     // A scene switch replaces the patterns; the version check below reloads the grids.
@@ -231,11 +265,32 @@ void ModLanesEditor::timerCallback()
         inspector.clear();
     }
 
+   #if MODLANES_PAINT_LOG
+    double mark = juce::Time::getMillisecondCounterHiRes();
+    const auto section = [&mark] (int i)
+    {
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        frameTimes.section[i] += now - mark;
+        mark = now;
+    };
+   #else
+    const auto section = [] (int) {};
+   #endif
     for (auto& lane : lanes)
+    {
         lane->refresh (live);
+        section (0);
+        paintNow();
+        section (1);
+    }
 
     for (auto& lfo : lfos)
+    {
         lfo->refresh (live);
+        section (2);
+        paintNow();
+        section (3);
+    }
 
     if (const bool running = proc.transportRunning.load(); running != wasRunning)
     {
@@ -246,6 +301,13 @@ void ModLanesEditor::timerCallback()
 
 void ModLanesEditor::paint (juce::Graphics& g)
 {
+   #if MODLANES_PAINT_LOG
+    struct Timed
+    {
+        double start = juce::Time::getMillisecondCounterHiRes();
+        ~Timed() { frameTimes.editorMs += juce::Time::getMillisecondCounterHiRes() - start; ++frameTimes.editorPaints; }
+    } timed;
+   #endif
     // Grain and astrolabe are rendered once per size / scale and then just copied.
     const float scale = g.getInternalContext().getPhysicalPixelScaleFactor();
     const int width = juce::roundToInt ((float) getWidth() * scale), height = juce::roundToInt ((float) getHeight() * scale);
@@ -260,7 +322,7 @@ void ModLanesEditor::paint (juce::Graphics& g)
         bg.fillAll();
         theme::drawAstrolabeUnder (bg, *this, 0.7f);
     }
-    g.drawImageTransformed (background, juce::AffineTransform::scale (1.0f / scale));
+    modlanes::theme::drawCachedImage (g, background, juce::AffineTransform::scale (1.0f / scale));
 
     g.addTransform (juce::AffineTransform::scale (uiScale));
     auto header = logicalBounds().reduced (14, 10).removeFromTop (34);

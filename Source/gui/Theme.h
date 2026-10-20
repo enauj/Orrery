@@ -258,6 +258,17 @@ inline Astrolabe astrolabe (juce::Component& top)
     return { cache, cachedScale };
 }
 
+// Copies an image cached at screen resolution. The transform maps its pixels 1:1 onto
+// the screen, but often at half-pixel positions (e.g. 75% interface scale on a 200%
+// display), where JUCE would resample every pixel smoothly; a plain copy looks the same
+// and is several times cheaper.
+inline void drawCachedImage (juce::Graphics& g, const juce::Image& image, const juce::AffineTransform& transform)
+{
+    juce::Graphics::ScopedSaveState save (g);
+    g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality);
+    g.drawImageTransformed (image, transform);
+}
+
 // Draws the part of the astrolabe that lies under `owner` (in owner coordinates).
 inline void drawAstrolabeUnder (juce::Graphics& g, juce::Component& owner, float opacity)
 {
@@ -265,9 +276,9 @@ inline void drawAstrolabeUnder (juce::Graphics& g, juce::Component& owner, float
     const auto origin = owner.getLocalPoint (top, juce::Point<float>());
     const float unitsPerPixel = owner.getLocalPoint (top, juce::Point<float> (1.0f, 0.0f)).x - origin.x;
     const auto a = astrolabe (*top);
+    juce::Graphics::ScopedSaveState save (g);
     g.setOpacity (opacity);
-    g.drawImageTransformed (a.image, juce::AffineTransform::scale (unitsPerPixel / a.scale).translated (origin));
-    g.setOpacity (1.0f);
+    drawCachedImage (g, a.image, juce::AffineTransform::scale (unitsPerPixel / a.scale).translated (origin));
 }
 
 // Empty panel space: a dark inset showing the part of the astrolabe that lies

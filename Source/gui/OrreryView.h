@@ -46,10 +46,11 @@ public:
 
     void refresh (bool live)
     {
-        // Repaint when a planet moves by about a degree or the alignment text changes.
+        // Everything repaints when the text or an orbit's on/off state changes; otherwise
+        // only the planets that moved by about a degree, around their old and new spots.
         juce::int64 key = live ? 1 : 0;
         for (int i = 0; i < kNumLanes; ++i)
-            key = key * 400 + juce::roundToInt (planetAngle (i) / juce::MathConstants<float>::twoPi * 360.0f) + 20;
+            key = key * 2 + (proc.apvts.getRawParameterValue (params::lane (i, "on"))->load() >= 0.5f ? 1 : 0);
         key = key * 1000 + juce::roundToInt (naturalAlignmentBars() * 8.0);
         key = key * 20 + (int) proc.apvts.getRawParameterValue (params::masterLength)->load();
 
@@ -57,8 +58,19 @@ public:
         {
             shownKey = key;
             liveView = live;
+            for (int i = 0; i < kNumLanes; ++i)
+                shownDegrees[(size_t) i] = degrees (i);
             repaint();
+            return;
         }
+
+        for (int i = 0; i < kNumLanes; ++i)
+            if (const int d = degrees (i); d != shownDegrees[(size_t) i])
+            {
+                const auto before = planetArea (i, shownDegrees[(size_t) i]);
+                shownDegrees[(size_t) i] = d;
+                repaint (before.getUnion (planetArea (i, d)));
+            }
     }
 
     void paint (juce::Graphics& g) override
@@ -72,9 +84,7 @@ public:
         g.drawText ("ORRERY", area.removeFromTop (14), juce::Justification::centredLeft);
 
         textArea = area.removeFromBottom (30);
-        const float size = (float) juce::jmin (area.getWidth(), area.getHeight());
-        const auto centre = area.toFloat().getCentre();
-        const float outer = size * 0.5f - 4.0f;
+        const auto [centre, outer] = layout();
 
         // Alignment marker at the top
         g.setColour (theme::gold.withAlpha (0.25f));
@@ -87,15 +97,14 @@ public:
 
         for (int i = 0; i < kNumLanes; ++i)
         {
-            const float radius = outer * (0.42f + 0.29f * (float) i);
+            const float radius = orbitRadius (i, outer);
             const bool on = proc.apvts.getRawParameterValue (params::lane (i, "on"))->load() >= 0.5f;
             const auto colour = theme::laneColour (i).withMultipliedAlpha (on ? 1.0f : 0.3f);
 
             g.setColour (colour.withAlpha (0.28f * colour.getFloatAlpha()));
             g.drawEllipse (centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f, 1.0f);
 
-            const float angle = planetAngle (i);
-            const juce::Point<float> planet (centre.x + radius * std::sin (angle), centre.y - radius * std::cos (angle));
+            const auto planet = planetCentre (i, (float) shownDegrees[(size_t) i]);
             const float planetSize = 7.0f + (float) i;
             g.setColour (theme::bg);
             g.fillEllipse (juce::Rectangle<float> (planetSize + 3.0f, planetSize + 3.0f).withCentre (planet));
@@ -149,6 +158,32 @@ public:
     }
 
 private:
+    // Circle of the planets and the radius of each orbit on it.
+    std::pair<juce::Point<float>, float> layout() const
+    {
+        auto area = getLocalBounds().reduced (10, 8);
+        area.removeFromTop (14);
+        area.removeFromBottom (30);
+        return { area.toFloat().getCentre(), (float) juce::jmin (area.getWidth(), area.getHeight()) * 0.5f - 4.0f };
+    }
+
+    static float orbitRadius (int lane, float outer) { return outer * (0.42f + 0.29f * (float) lane); }
+
+    int degrees (int lane) const { return juce::roundToInt (planetAngle (lane) / juce::MathConstants<float>::twoPi * 360.0f); }
+
+    juce::Point<float> planetCentre (int lane, float deg) const
+    {
+        const auto [centre, outer] = layout();
+        const float radius = orbitRadius (lane, outer), angle = juce::degreesToRadians (deg);
+        return { centre.x + radius * std::sin (angle), centre.y - radius * std::cos (angle) };
+    }
+
+    juce::Rectangle<int> planetArea (int lane, int deg) const
+    {
+        const float size = 7.0f + (float) lane + 3.0f;
+        return juce::Rectangle<float> (size, size).withCentre (planetCentre (lane, (float) deg)).getSmallestIntegerContainer().expanded (2);
+    }
+
     // Clockwise from the top (the alignment point); idle orbits rest at their phase.
     float planetAngle (int lane) const
     {
@@ -170,6 +205,7 @@ private:
     ModLanesProcessor& proc;
     juce::Rectangle<int> textArea;
     juce::int64 shownKey = -1;
+    std::array<int, kNumLanes> shownDegrees {};
     bool liveView = true;
     bool canApply = false;
 };

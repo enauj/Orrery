@@ -95,6 +95,13 @@ void StepGrid::animateModulation()
     if (! show && liveBlocks.empty())
         return;
 
+    // A moving curve repaints most of a block, so it follows the LFOs at about 30 frames
+    // per second (like the LFO waves); the playhead still moves every frame.
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (show && version == shownLiveVersion && ! liveBlocks.empty() && now - lastLiveCurveMs < 30.0)
+        return;
+    lastLiveCurveMs = now;
+
     shownLfoOutputs = outputs;
     shownLiveVersion = version;
     liveBlocks.clear();
@@ -110,9 +117,18 @@ void StepGrid::animateModulation()
             float ampMod = 0.0f;
             if (liveMod.modulate (lane, live.block, ampMod, live.lfo))
             {
+                // The outlines are built here once per frame (paint() runs for every
+                // playhead move too), with a point every 2 px and plain joints; only the
+                // strip the curve covers (old and new) repaints, not the whole block.
                 live.block.amount = juce::jlimit (-1.0f, 1.0f, live.block.amount + ampMod);
-                liveBlocks.push_back (live);
-                area = area.getUnion (geometryFor (b).body.toNearestInt().expanded (2));
+                const auto geo = geometryFor (live.block);
+                const int resolution = juce::jlimit (16, 300, juce::jmax ((int) geo.curve.getWidth() / 2, (int) (live.block.cycles * 12.0f)));
+                const auto curve = theme::makeBlockCurve (live.block, geo.curve, resolution);
+                juce::PathStrokeType (4.0f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt).createStrokedPath (live.glow, curve);
+                juce::PathStrokeType (1.6f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt).createStrokedPath (live.line, curve);
+                area = area.getUnion (live.glow.getBounds().expanded (1.0f).getSmallestIntegerContainer()
+                                          .getIntersection (geo.body.toNearestInt()));
+                liveBlocks.push_back (std::move (live));
             }
         }
 
@@ -129,14 +145,11 @@ void StepGrid::paintLiveBlocks (juce::Graphics& g)
         juce::Graphics::ScopedSaveState save (g);
         g.reduceClipRegion (geo.body.toNearestInt());
 
-        const int resolution = juce::jlimit (32, 600, juce::jmax ((int) geo.curve.getWidth(), (int) (live.block.cycles * 24.0f)));
-        const auto curve = theme::makeBlockCurve (live.block, geo.curve, resolution);
         const auto colour = theme::lfoColour (live.lfo);
-
         g.setColour (colour.withAlpha (0.25f));
-        g.strokePath (curve, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.fillPath (live.glow);
         g.setColour (colour);
-        g.strokePath (curve, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.fillPath (live.line);
     }
 }
 
@@ -186,22 +199,26 @@ void StepGrid::animate()
         return;
     }
 
-    // The playhead line, its dot and the highlighted step cell.
-    juce::Rectangle<int> area;
+    // The highlighted step cell repaints only when the playhead enters another step;
+    // in between, only a narrow band around the line and dot (old and new spot).
+    juce::Rectangle<int> cell, band;
     if (const float position = (float) shownPosition; position >= 0.0f)
     {
         const float sw = stepWidth();
         const int cellX = (int) ((float) (int) position * sw);
-        area = juce::Rectangle<int> (cellX - 1, 0, (int) std::ceil (sw) + 2, getHeight())
-                   .getUnion ({ (int) (position * sw) - 8, 0, 16, getHeight() });
+        cell = { cellX - 1, 0, (int) std::ceil (sw) + 2, getHeight() };
+        band = { (int) (position * sw) - 8, 0, 16, getHeight() };
     }
 
-    // Repaint whenever the dot moved, not only when the area changed: the area is the
-    // whole step cell, so it stays the same while the dot travels through a step.
-    if (shownPosition != lastPaintedPosition || area != lastLiveArea)
+    if (cell != lastLiveArea)
     {
-        repaint (lastLiveArea.getUnion (area));
-        lastLiveArea = area;
+        repaint (lastLiveArea.getUnion (cell));
+        lastLiveArea = cell;
+    }
+    if (shownPosition != lastPaintedPosition)
+    {
+        repaint (lastLiveBand.getUnion (band));
+        lastLiveBand = band;
         lastPaintedPosition = shownPosition;
     }
 }
@@ -301,6 +318,14 @@ StepGrid::StaticKey StepGrid::makeStaticKey (float scale) const
 
 void StepGrid::paint (juce::Graphics& g)
 {
+   #if MODLANES_PAINT_LOG
+    struct Timed
+    {
+        double start = juce::Time::getMillisecondCounterHiRes();
+        ~Timed() { paintStats.ms += juce::Time::getMillisecondCounterHiRes() - start; ++paintStats.calls; }
+    } timed;
+    paintStats.area += (double) g.getClipBounds().getWidth() * g.getClipBounds().getHeight();
+   #endif
     const float scale = g.getInternalContext().getPhysicalPixelScaleFactor();
     const auto key = makeStaticKey (scale);
 
@@ -317,7 +342,8 @@ void StepGrid::paint (juce::Graphics& g)
         if (key.blend != staticKey.blend || key.steps != staticKey.steps || key.mode != staticKey.mode || key.on != staticKey.on) reason << "params ";
         if (key.selected != staticKey.selected || key.selectedPoint != staticKey.selectedPoint) reason << "selection ";
        #endif
-        staticLayer = juce::Image (juce::Image::ARGB, juce::jmax (1, juce::roundToInt ((float) getWidth() * scale)),
+        staticLayer = juce::Image (juce::Image::RGB, // opaque: copied without blending
+                                   juce::jmax (1, juce::roundToInt ((float) getWidth() * scale)),
                                    juce::jmax (1, juce::roundToInt ((float) getHeight() * scale)), false, theme::cacheImageType());
         juce::Graphics layer (staticLayer);
         layer.addTransform (juce::AffineTransform::scale (scale));
@@ -329,7 +355,7 @@ void StepGrid::paint (juce::Graphics& g)
        #endif
     }
 
-    g.drawImageTransformed (staticLayer, juce::AffineTransform::scale (1.0f / scale));
+    theme::drawCachedImage (g, staticLayer, juce::AffineTransform::scale (1.0f / scale));
 
     // Live layer: current step, follower trace, playhead and value dot.
     const float position = liveView ? (float) shownPosition : -1.0f;

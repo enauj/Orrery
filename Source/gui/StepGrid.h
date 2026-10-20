@@ -61,6 +61,8 @@ public:
     // Benchmark-only instrumentation: called for every animation step and paint.
     static inline std::function<void (int lane, double ms, double position)> animateLog, paintLog;
     static inline std::function<void (int lane, double durationMs, juce::String reason)> staticRenderLog;
+    struct PaintStats { double ms = 0.0, area = 0.0; int calls = 0; };
+    static inline PaintStats paintStats;
    #endif
 
     void reloadFromProcessor();
@@ -157,7 +159,7 @@ private:
     };
     StaticKey makeStaticKey (float scale) const;
     juce::Image staticLayer;
-    juce::Rectangle<int> lastLiveArea;
+    juce::Rectangle<int> lastLiveArea, lastLiveBand;
 
     // The drawn playhead runs on its own clock at the orbit's speed and is only
     // nudged towards the reported position, so bursty audio blocks do not make it jump.
@@ -180,11 +182,13 @@ private:
     {
         Block block;
         int lfo = 0;
+        juce::Path glow, line; // stroked outlines of the live curve
     };
     LiveModulation liveMod { proc };
     std::vector<LiveBlock> liveBlocks;
     std::array<float, kNumLfos> shownLfoOutputs {};
     std::array<int, 4> shownLiveVersion {};
+    double lastLiveCurveMs = 0.0;
     juce::Rectangle<int> liveBlockArea;
     int selected = -1;
     int hovered = -1;

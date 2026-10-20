@@ -24,6 +24,7 @@ juce_add_plugin(ModLanes
     PLUGIN_MANUFACTURER_CODE Enau
     PLUGIN_CODE MdLn
     PRODUCT_NAME "Orrery"
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
     FORMATS VST3 Standalone
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT TRUE
@@ -66,6 +67,7 @@ if(MODLANES_BENCH)
     target_sources(ModLanesBench PRIVATE
         Source/bench/Benchmark.cpp
         Source/bench/LiveCheck.cpp
+        Source/bench/CpuTime.cpp
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
         Source/gui/StepGrid.cpp
