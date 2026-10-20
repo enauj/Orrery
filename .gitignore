@@ -1,0 +1,36 @@
+# Build output (CMake build folders, including JUCE and clap-juce-extensions fetched into build/_deps)
+build/
+build-*/
+cmake-build-*/
+out/
+
+# Release zips made by scripts/make-release.ps1
+dist/
+
+# IDE and editor files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+CMakeUserPresets.json
+
+# Compiled binaries that might end up outside build/
+*.clap
+*.vst3
+*.exe
+*.dll
+*.lib
+*.exp
+*.pdb
+*.obj
+*.ilk
+
+# OS clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local Claude Code settings
+.claude/settings.local.json
